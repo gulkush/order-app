@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Order Management</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module" src="./app.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  </head>
+  <body class="bg-slate-100 text-slate-900">
+    <div class="max-w-6xl mx-auto px-4 py-6" x-data="orderApp()" x-init="init()">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-xl font-semibold">Order Management</h1>
+        <button
+          class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          @click="openNewOrder()"
+        >
+          + Add New Order
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2 mb-3 text-xs">
+        <button
+          class="px-3 py-1 rounded border"
+          :class="filterStatus === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white'"
+          @click="setFilter('all')"
+        >
+          All
+        </button>
+        <button
+          class="px-3 py-1 rounded border"
+          :class="filterStatus === 'order' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white'"
+          @click="setFilter('order')"
+        >
+          Blue (Order)
+        </button>
+        <button
+          class="px-3 py-1 rounded border"
+          :class="filterStatus === 'dispatched' ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-white'"
+          @click="setFilter('dispatched')"
+        >
+          Yellow (Dispatched)
+        </button>
+        <button
+          class="px-3 py-1 rounded border"
+          :class="filterStatus === 'paid' ? 'bg-green-600 text-white border-green-600' : 'bg-white'"
+          @click="setFilter('paid')"
+        >
+          Green (Paid)
+        </button>
+      </div>
+
+      <div class="mb-3 text-xs text-slate-700" x-show="filterStatus === 'order'">
+        Pending Quantity Total: <span class="font-medium" x-text="pendingOrderQuantitySum()"></span>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'all' || filterStatus === 'order'">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="loading">
+              <tr>
+                <td class="px-4 py-4" colspan="6">Loading...</td>
+              </tr>
+            </template>
+            <template x-if="!loading && orders.length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No orders yet.</td>
+              </tr>
+            </template>
+            <template x-for="order in paginatedOrders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'dispatched'">
+        <div class="px-4 py-2 text-xs font-medium text-slate-600">Recent Dispatches (last 7 days)</div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="dispatchedRecentOrders().length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No recent dispatched orders.</td>
+              </tr>
+            </template>
+            <template x-for="order in dispatchedRecentOrders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
+        <div class="px-4 py-2 text-xs font-medium text-slate-600">Older Than 7 Days (but within 30)</div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="dispatchedOld7Orders().length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No dispatched orders in this range.</td>
+              </tr>
+            </template>
+            <template x-for="order in dispatchedOld7Orders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
+        <div class="px-4 py-2 text-xs font-medium text-slate-600">Older Than 30 Days</div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="dispatchedOld30Orders().length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No older dispatched orders.</td>
+              </tr>
+            </template>
+            <template x-for="order in dispatchedOld30Orders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'paid'">
+        <div class="px-4 py-2 text-xs font-medium text-slate-600">Recent Payments (last 30 days)</div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="paidRecentOrders().length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No recent paid orders.</td>
+              </tr>
+            </template>
+            <template x-for="order in paidRecentOrders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'paid'">
+        <div class="px-4 py-2 text-xs font-medium text-slate-600 flex items-center justify-between">
+          <span>Older Than 30 Days</span>
+          <button
+            class="px-3 py-1 rounded border text-red-600 border-red-200 hover:bg-red-50"
+            @click="deleteOlderPaid()"
+          >
+            Delete All Older Records
+          </button>
+        </div>
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-50">
+            <tr>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('partyName')">
+                  Party Name <span class="text-xs" x-text="sortIndicator('partyName')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('orderDate')">
+                  Order Date <span class="text-xs" x-text="sortIndicator('orderDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Quantity</th>
+              <th class="text-left px-4 py-3 font-medium">Rate</th>
+              <th class="text-left px-4 py-3 font-medium">
+                <button class="hover:underline" @click="toggleSort('dispatchDate')">
+                  Dispatch <span class="text-xs" x-text="sortIndicator('dispatchDate')"></span>
+                </button>
+              </th>
+              <th class="text-left px-4 py-3 font-medium">Payment</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-if="paidOldOrders().length === 0">
+              <tr>
+                <td class="px-4 py-4" colspan="6">No older paid orders.</td>
+              </tr>
+            </template>
+            <template x-for="order in paidOldOrders()" :key="order.id">
+              <tr :class="rowClass(order)" class="border-t">
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="order.partyName || '-'"
+                ></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openEditOrder(order)"
+                  x-text="formatDate(order.orderDate)"
+                ></td>
+                <td class="px-4 py-3" x-text="order.orderQuantity ?? ''"></td>
+                <td class="px-4 py-3" x-text="order.rate ?? ''"></td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openDispatch(order)"
+                >
+                  <div class="text-xs" x-text="dispatchSummary(order)"></div>
+                </td>
+                <td
+                  class="px-4 py-3 cursor-pointer hover:underline"
+                  @click="openPayment(order)"
+                >
+                  <div class="text-xs" x-text="paymentSummary(order)"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div
+        class="flex items-center justify-center gap-2 mt-3 text-sm"
+        x-show="(filterStatus === 'all' || filterStatus === 'order') && pageCount() > 1"
+      >
+        <button
+          class="px-3 py-1 rounded border"
+          :class="currentPage === 1 ? 'text-slate-400 border-slate-200' : 'bg-white'"
+          @click="goToPage(currentPage - 1)"
+          :disabled="currentPage === 1"
+        >
+          Prev
+        </button>
+        <template x-for="page in pages()" :key="page">
+          <button
+            class="px-3 py-1 rounded border"
+            :class="currentPage === page ? 'bg-slate-900 text-white border-slate-900' : 'bg-white'"
+            @click="goToPage(page)"
+            x-text="page"
+          ></button>
+        </template>
+        <button
+          class="px-3 py-1 rounded border"
+          :class="currentPage === pageCount() ? 'text-slate-400 border-slate-200' : 'bg-white'"
+          @click="goToPage(currentPage + 1)"
+          :disabled="currentPage === pageCount()"
+        >
+          Next
+        </button>
+      </div>
+
+      <!-- Order Form Modal -->
+      <div
+        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        x-show="showOrderForm"
+        x-transition
+      >
+        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closeOrderForm()">
+          <div class="px-4 py-3 border-b flex items-center justify-between">
+            <h2 class="font-medium" x-text="orderFormMode === 'create' ? 'New Order' : 'Edit Order'"></h2>
+            <button
+              type="button"
+              class="px-3 py-1 rounded border text-red-600 border-red-200 hover:bg-red-50 disabled:text-slate-400 disabled:border-slate-200 disabled:hover:bg-white"
+              x-show="orderFormMode === 'edit'"
+              :disabled="!canDeleteOrderFromEdit()"
+              @click="deleteOrderFromEdit()"
+            >
+              Delete
+            </button>
+          </div>
+          <div class="p-4 space-y-3">
+            <div>
+              <label class="text-xs">Order Date</label>
+              <input type="date" class="w-full border rounded px-3 py-2" x-model="orderForm.orderDate" />
+            </div>
+            <div>
+              <label class="text-xs">Party Name</label>
+              <input type="text" class="w-full border rounded px-3 py-2" x-model="orderForm.partyName" />
+            </div>
+            <div>
+              <label class="text-xs">Order Details</label>
+              <textarea class="w-full border rounded px-3 py-2" x-model="orderForm.orderDetails"></textarea>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="text-xs">Order Quantity</label>
+                <input type="number" step="0.01" class="w-full border rounded px-3 py-2" x-model.number="orderForm.orderQuantity" />
+              </div>
+              <div>
+                <label class="text-xs">Rate</label>
+                <input type="number" step="0.01" class="w-full border rounded px-3 py-2" x-model.number="orderForm.rate" />
+              </div>
+            </div>
+          </div>
+          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+            <button class="px-4 py-2" @click="closeOrderForm()">Cancel</button>
+            <button class="bg-blue-600 text-white px-4 py-2 rounded" @click="saveOrder()">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dispatch Form Modal -->
+      <div
+        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        x-show="showDispatchForm"
+        x-transition
+      >
+        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closeDispatchForm()">
+          <div class="px-4 py-3 border-b">
+            <h2 class="font-medium">Dispatch</h2>
+          </div>
+          <div class="p-4 space-y-3">
+            <div>
+              <label class="text-xs">Dispatch Number</label>
+              <input type="text" class="w-full border rounded px-3 py-2" x-model="dispatchForm.dispatchNumber" />
+            </div>
+            <div>
+              <label class="text-xs">Dispatch Date</label>
+              <input type="date" class="w-full border rounded px-3 py-2" x-model="dispatchForm.dispatchDate" />
+            </div>
+            <div>
+              <label class="text-xs">Dispatch Details</label>
+              <textarea class="w-full border rounded px-3 py-2" x-model="dispatchForm.dispatchDetails"></textarea>
+            </div>
+            <div>
+              <label class="text-xs">Rate</label>
+              <input
+                type="number"
+                class="w-full border rounded px-3 py-2 bg-slate-50"
+                :value="activeRate()"
+                disabled
+              />
+            </div>
+            <div>
+              <label class="text-xs">Dispatch Quantity</label>
+              <input type="number" step="0.01" class="w-full border rounded px-3 py-2" x-model.number="dispatchForm.dispatchQuantity" />
+            </div>
+            <div>
+              <label class="text-xs">Tax</label>
+              <input type="number" step="0.01" class="w-full border rounded px-3 py-2" x-model.number="dispatchForm.tax" />
+            </div>
+            <div class="text-xs text-slate-500">
+              Amount (auto): <span x-text="calcDispatchAmount()"></span>
+            </div>
+          </div>
+          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+            <button class="px-4 py-2" @click="closeDispatchForm()">Cancel</button>
+            <button class="bg-amber-600 text-white px-4 py-2 rounded" @click="saveDispatch()">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Payment Form Modal -->
+      <div
+        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        x-show="showPaymentForm"
+        x-transition
+      >
+        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closePaymentForm()">
+          <div class="px-4 py-3 border-b">
+            <h2 class="font-medium">Payment</h2>
+          </div>
+          <div class="p-4 space-y-3">
+            <div>
+              <label class="text-xs">Payment Date</label>
+              <input type="date" class="w-full border rounded px-3 py-2" x-model="paymentForm.paymentDate" />
+            </div>
+            <div>
+              <label class="text-xs">Received By</label>
+              <input type="text" class="w-full border rounded px-3 py-2" x-model="paymentForm.receivedBy" />
+            </div>
+            <div>
+              <label class="text-xs">To Account</label>
+              <input type="text" class="w-full border rounded px-3 py-2" x-model="paymentForm.toAccount" />
+            </div>
+            <div>
+              <label class="text-xs">Payment Details</label>
+              <textarea class="w-full border rounded px-3 py-2" x-model="paymentForm.paymentDetails"></textarea>
+            </div>
+            <div>
+              <label class="text-xs">Amount Received</label>
+              <input
+                type="number"
+                step="0.01"
+                class="w-full border rounded px-3 py-2"
+                x-model.number="paymentForm.amountReceived"
+              />
+            </div>
+          </div>
+          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+            <button class="px-4 py-2" @click="closePaymentForm()">Cancel</button>
+            <button class="bg-emerald-600 text-white px-4 py-2 rounded" @click="savePayment()">
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
