@@ -119,34 +119,34 @@
       </div>
 
       <div x-show="authReady && currentUser">
-      <div class="flex items-center gap-2 mb-3 text-xs">
+      <div class="flex items-center gap-2 mb-3 text-sm">
         <button
-          class="px-3 py-1 rounded border"
+          class="px-4 py-2 rounded border"
           :class="filterStatus === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white'"
           @click="setFilter('all')"
         >
-          All
+          All (<span x-text="orders.length"></span>)
         </button>
         <button
-          class="px-3 py-1 rounded border"
+          class="px-4 py-2 rounded border"
           :class="filterStatus === 'order' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white'"
           @click="setFilter('order')"
         >
-          Order
+          Order (<span x-text="orders.filter((o) => o.status === 'order').length"></span>)
         </button>
         <button
-          class="px-3 py-1 rounded border"
+          class="px-4 py-2 rounded border"
           :class="filterStatus === 'dispatched' ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-white'"
           @click="setFilter('dispatched')"
         >
-          Dispatch
+          Dispatch (<span x-text="orders.filter((o) => (o.status === 'dispatched' || o.status === 'paid') && !isFullyPaid(o)).length"></span>)
         </button>
         <button
-          class="px-3 py-1 rounded border"
+          class="px-4 py-2 rounded border"
           :class="filterStatus === 'paid' ? 'bg-green-600 text-white border-green-600' : 'bg-white'"
           @click="setFilter('paid')"
         >
-          Paid
+          Paid (<span x-text="orders.filter((o) => isFullyPaid(o)).length"></span>)
         </button>
       </div>
 

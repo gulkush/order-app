@@ -56,6 +56,12 @@ window.orderApp = function orderApp() {
     otpSent: false,
     confirmationResult: null,
     recaptchaVerifier: null,
+    filterCounts: {
+      all: 0,
+      order: 0,
+      dispatched: 0,
+      paid: 0,
+    },
     filterStatus: "all",
     pageSize: 20,
     currentPage: 1,
@@ -97,6 +103,7 @@ window.orderApp = function orderApp() {
           await this.loadOrders();
         } else {
           this.orders = [];
+          this.filterCounts = { all: 0, order: 0, dispatched: 0, paid: 0 };
           this.loading = false;
           this.showOrderForm = false;
           this.showDispatchForm = false;
@@ -150,6 +157,7 @@ window.orderApp = function orderApp() {
     async loadOrders(skipSanitize = false) {
       if (!this.currentUser) {
         this.orders = [];
+        this.filterCounts = { all: 0, order: 0, dispatched: 0, paid: 0 };
         this.loading = false;
         return;
       }
@@ -190,13 +198,27 @@ window.orderApp = function orderApp() {
           const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
           return bTime - aTime;
         });
+        this.recomputeFilterCounts();
         this.unauthorizedAlertShown = false;
       } catch (error) {
         this.orders = [];
+        this.filterCounts = { all: 0, order: 0, dispatched: 0, paid: 0 };
         this.handleFirestoreError(error);
       } finally {
         this.loading = false;
       }
+    },
+
+    recomputeFilterCounts() {
+      const all = this.orders.length;
+      const order = this.orders.filter((entry) => entry.status === "order").length;
+      const paid = this.orders.filter((entry) => this.isFullyPaid(entry)).length;
+      const dispatched = this.orders.filter(
+        (entry) =>
+          (entry.status === "dispatched" || entry.status === "paid") &&
+          !this.isFullyPaid(entry)
+      ).length;
+      this.filterCounts = { all, order, dispatched, paid };
     },
 
     async sendOtp() {
@@ -289,6 +311,21 @@ window.orderApp = function orderApp() {
     setFilter(status) {
       this.filterStatus = status;
       this.currentPage = 1;
+    },
+
+    filterCount(status) {
+      if (status === "all") return this.orders.length;
+      if (status === "paid") {
+        return this.orders.filter((order) => this.isFullyPaid(order)).length;
+      }
+      if (status === "dispatched") {
+        return this.orders.filter(
+          (order) =>
+            (order.status === "dispatched" || order.status === "paid") &&
+            !this.isFullyPaid(order)
+        ).length;
+      }
+      return this.orders.filter((order) => order.status === status).length;
     },
 
     filteredOrders() {
