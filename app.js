@@ -43,6 +43,8 @@ window.orderApp = function orderApp() {
     showOrderForm: false,
     showDispatchForm: false,
     showPaymentForm: false,
+    showDrawer: false,
+    unauthorizedAlertShown: false,
     authReady: false,
     currentUser: null,
     authLoading: false,
@@ -89,6 +91,7 @@ window.orderApp = function orderApp() {
         this.authReady = true;
         this.authError = "";
         this.authLoading = false;
+        this.unauthorizedAlertShown = false;
         if (this.currentUser) {
           await this.syncCurrentUserPhone();
           await this.loadOrders();
@@ -98,6 +101,7 @@ window.orderApp = function orderApp() {
           this.showOrderForm = false;
           this.showDispatchForm = false;
           this.showPaymentForm = false;
+          this.showDrawer = false;
           this.otpSent = false;
           this.confirmationResult = null;
           this.phoneForm.otp = "";
@@ -113,8 +117,14 @@ window.orderApp = function orderApp() {
       return String(error?.code || "").includes("permission-denied");
     },
 
-    handleFirestoreError(error) {
-      if (this.isPermissionDenied(error)) {
+    handleFirestoreError(error, options = {}) {
+      const { suppressUnauthorizedAlert = false } = options;
+      if (
+        this.isPermissionDenied(error) &&
+        !suppressUnauthorizedAlert &&
+        !this.unauthorizedAlertShown
+      ) {
+        this.unauthorizedAlertShown = true;
         window.alert("Your phone number is not authorized to use this app.");
       }
       console.error("Firestore error", error);
@@ -133,7 +143,7 @@ window.orderApp = function orderApp() {
           { merge: true }
         );
       } catch (error) {
-        this.handleFirestoreError(error);
+        this.handleFirestoreError(error, { suppressUnauthorizedAlert: true });
       }
     },
 
@@ -180,6 +190,7 @@ window.orderApp = function orderApp() {
           const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
           return bTime - aTime;
         });
+        this.unauthorizedAlertShown = false;
       } catch (error) {
         this.orders = [];
         this.handleFirestoreError(error);
@@ -252,9 +263,12 @@ window.orderApp = function orderApp() {
     },
 
     async logout() {
+      const confirmSignOut = window.confirm("Do you really want to sign out?");
+      if (!confirmSignOut) return;
       this.authLoading = true;
       this.authError = "";
       try {
+        this.showDrawer = false;
         await signOutUser();
       } catch (err) {
         console.error("Sign out error", err);
@@ -262,6 +276,14 @@ window.orderApp = function orderApp() {
       } finally {
         this.authLoading = false;
       }
+    },
+
+    toggleDrawer() {
+      this.showDrawer = !this.showDrawer;
+    },
+
+    closeDrawer() {
+      this.showDrawer = false;
     },
 
     setFilter(status) {

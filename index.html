@@ -23,15 +23,56 @@
           </template>
           <template x-if="authReady && currentUser">
             <button
-              class="px-4 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50"
-              @click="logout()"
-              :disabled="authLoading"
+              class="w-10 h-10 rounded border border-slate-300 bg-white hover:bg-slate-50 flex items-center justify-center"
+              @click="toggleDrawer()"
+              aria-label="Open menu"
             >
-              Sign Out
+              <span class="sr-only">Open menu</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                class="w-5 h-5 text-slate-700"
+              >
+                <path d="M3 10.5 12 3l9 7.5" />
+                <path d="M5 9.5V21h14V9.5" />
+                <path d="M9 21v-6h6v6" />
+              </svg>
             </button>
           </template>
         </div>
       </div>
+
+      <div
+        class="fixed inset-0 z-40 bg-black/30"
+        x-show="showDrawer"
+        x-transition.opacity
+        @click="closeDrawer()"
+      ></div>
+      <aside
+        class="fixed top-0 right-0 h-full w-72 bg-white shadow-xl z-50 p-4"
+        x-show="showDrawer"
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="translate-x-full"
+        x-transition:enter-end="translate-x-0"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="translate-x-0"
+        x-transition:leave-end="translate-x-full"
+      >
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-medium">Menu</h3>
+          <button class="px-2 py-1 rounded border" @click="closeDrawer()">Close</button>
+        </div>
+        <button
+          class="w-full px-4 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50 text-left"
+          @click="logout()"
+          :disabled="authLoading"
+        >
+          Sign Out
+        </button>
+      </aside>
 
       <div class="mb-4 text-sm text-slate-600" x-show="!authReady">
         Checking authentication...
