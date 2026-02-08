@@ -4,10 +4,18 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
+  setDoc,
   doc,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { db, ensureAnonymousAuth } from "./firebase.js";
+import {
+  db,
+  auth,
+  observeAuthState,
+  createRecaptchaVerifier,
+  sendPhoneOtp,
+  signOutUser,
+} from "./firebase.js";
 
 const ordersRef = collection(db, "orders");
 
@@ -35,6 +43,17 @@ window.orderApp = function orderApp() {
     showOrderForm: false,
     showDispatchForm: false,
     showPaymentForm: false,
+    authReady: false,
+    currentUser: null,
+    authLoading: false,
+    authError: "",
+    phoneForm: {
+      phoneNumber: "",
+      otp: "",
+    },
+    otpSent: false,
+    confirmationResult: null,
+    recaptchaVerifier: null,
     filterStatus: "all",
     pageSize: 20,
     currentPage: 1,
@@ -65,52 +84,184 @@ window.orderApp = function orderApp() {
     },
 
     async init() {
+      observeAuthState(async (user) => {
+        this.currentUser = user || null;
+        this.authReady = true;
+        this.authError = "";
+        this.authLoading = false;
+        if (this.currentUser) {
+          await this.syncCurrentUserPhone();
+          await this.loadOrders();
+        } else {
+          this.orders = [];
+          this.loading = false;
+          this.showOrderForm = false;
+          this.showDispatchForm = false;
+          this.showPaymentForm = false;
+          this.otpSent = false;
+          this.confirmationResult = null;
+          this.phoneForm.otp = "";
+          if (this.recaptchaVerifier) {
+            this.recaptchaVerifier.clear();
+            this.recaptchaVerifier = null;
+          }
+        }
+      });
+    },
+
+    isPermissionDenied(error) {
+      return String(error?.code || "").includes("permission-denied");
+    },
+
+    handleFirestoreError(error) {
+      if (this.isPermissionDenied(error)) {
+        window.alert("Your phone number is not authorized to use this app.");
+      }
+      console.error("Firestore error", error);
+    },
+
+    async syncCurrentUserPhone() {
+      const user = auth.currentUser;
+      const phone = user?.phoneNumber;
+      if (!user || !phone) return;
       try {
-        await ensureAnonymousAuth();
-        await this.loadOrders();
-      } catch (err) {
-        console.error("Auth error", err);
+        await setDoc(
+          doc(db, "users", user.uid),
+          {
+            phoneNumber: phone,
+          },
+          { merge: true }
+        );
+      } catch (error) {
+        this.handleFirestoreError(error);
       }
     },
 
     async loadOrders(skipSanitize = false) {
-      this.loading = true;
-      const snapshot = await getDocs(ordersRef);
-      const list = [];
-      const sanitizeUpdates = [];
-      snapshot.forEach((snap) => {
-        const data = snap.data();
-        if (!skipSanitize) {
-          const updatePayload = {};
-          const hasDispatchDate = !!data.dispatchDate;
-          if (!hasDispatchDate && data.status !== "order") {
-            updatePayload.status = "order";
-          }
-          if (data.orderQuantity === undefined && data.orderWeight !== undefined) {
-            updatePayload.orderQuantity = data.orderWeight;
-          }
-          if (data.dispatchQuantity === undefined && data.dispatchWeight !== undefined) {
-            updatePayload.dispatchQuantity = data.dispatchWeight;
-          }
-          if (Object.keys(updatePayload).length > 0) {
-            updatePayload.updatedAt = serverTimestamp();
-            const ref = doc(db, "orders", snap.id);
-            sanitizeUpdates.push(updateDoc(ref, updatePayload));
-          }
-        }
-        list.push({ id: snap.id, ...data });
-      });
-      if (!skipSanitize && sanitizeUpdates.length > 0) {
-        await Promise.all(sanitizeUpdates);
-        await this.loadOrders(true);
+      if (!this.currentUser) {
+        this.orders = [];
+        this.loading = false;
         return;
       }
-      this.orders = list.sort((a, b) => {
-        const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-        const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-        return bTime - aTime;
-      });
-      this.loading = false;
+      this.loading = true;
+      try {
+        const snapshot = await getDocs(ordersRef);
+        const list = [];
+        const sanitizeUpdates = [];
+        snapshot.forEach((snap) => {
+          const data = snap.data();
+          if (!skipSanitize) {
+            const updatePayload = {};
+            const hasDispatchDate = !!data.dispatchDate;
+            if (!hasDispatchDate && data.status !== "order") {
+              updatePayload.status = "order";
+            }
+            if (data.orderQuantity === undefined && data.orderWeight !== undefined) {
+              updatePayload.orderQuantity = data.orderWeight;
+            }
+            if (data.dispatchQuantity === undefined && data.dispatchWeight !== undefined) {
+              updatePayload.dispatchQuantity = data.dispatchWeight;
+            }
+            if (Object.keys(updatePayload).length > 0) {
+              updatePayload.updatedAt = serverTimestamp();
+              const ref = doc(db, "orders", snap.id);
+              sanitizeUpdates.push(updateDoc(ref, updatePayload));
+            }
+          }
+          list.push({ id: snap.id, ...data });
+        });
+        if (!skipSanitize && sanitizeUpdates.length > 0) {
+          await Promise.all(sanitizeUpdates);
+          await this.loadOrders(true);
+          return;
+        }
+        this.orders = list.sort((a, b) => {
+          const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+          const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+          return bTime - aTime;
+        });
+      } catch (error) {
+        this.orders = [];
+        this.handleFirestoreError(error);
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async sendOtp() {
+      const phoneNumber = (this.phoneForm.phoneNumber || "").trim();
+      if (!phoneNumber) {
+        this.authError = "Enter phone number in E.164 format, for example +14155552671.";
+        return;
+      }
+      if (!phoneNumber.startsWith("+")) {
+        this.authError = "Phone number must include country code, for example +1...";
+        return;
+      }
+
+      this.authLoading = true;
+      this.authError = "";
+      try {
+        if (this.recaptchaVerifier) {
+          this.recaptchaVerifier.clear();
+        }
+        const recaptchaEl = document.getElementById("recaptcha-container");
+        if (recaptchaEl) recaptchaEl.innerHTML = "";
+        this.recaptchaVerifier = createRecaptchaVerifier("recaptcha-container");
+        await this.recaptchaVerifier.render();
+        this.confirmationResult = await sendPhoneOtp(phoneNumber, this.recaptchaVerifier);
+        this.otpSent = true;
+      } catch (err) {
+        console.error("Phone auth send OTP error", err);
+        this.authError = err?.message || "Unable to send OTP.";
+        this.otpSent = false;
+      } finally {
+        this.authLoading = false;
+      }
+    },
+
+    async verifyOtp() {
+      const otp = (this.phoneForm.otp || "").trim();
+      if (!this.confirmationResult) {
+        this.authError = "Send OTP first.";
+        return;
+      }
+      if (!otp) {
+        this.authError = "Enter OTP.";
+        return;
+      }
+
+      this.authLoading = true;
+      this.authError = "";
+      try {
+        await this.confirmationResult.confirm(otp);
+        await this.syncCurrentUserPhone();
+        this.phoneForm.otp = "";
+        this.otpSent = false;
+        this.confirmationResult = null;
+        if (this.recaptchaVerifier) {
+          this.recaptchaVerifier.clear();
+          this.recaptchaVerifier = null;
+        }
+      } catch (err) {
+        console.error("Phone auth verify OTP error", err);
+        this.authError = err?.message || "OTP verification failed.";
+      } finally {
+        this.authLoading = false;
+      }
+    },
+
+    async logout() {
+      this.authLoading = true;
+      this.authError = "";
+      try {
+        await signOutUser();
+      } catch (err) {
+        console.error("Sign out error", err);
+        this.authError = err?.message || "Sign out failed.";
+      } finally {
+        this.authLoading = false;
+      }
     },
 
     setFilter(status) {
@@ -262,10 +413,14 @@ window.orderApp = function orderApp() {
         `Delete ${oldOrders.length} paid records older than 30 days? This cannot be undone.`
       );
       if (!confirmDelete) return;
-      await Promise.all(
-        oldOrders.map((order) => deleteDoc(doc(db, "orders", order.id)))
-      );
-      await this.loadOrders();
+      try {
+        await Promise.all(
+          oldOrders.map((order) => deleteDoc(doc(db, "orders", order.id)))
+        );
+        await this.loadOrders();
+      } catch (error) {
+        this.handleFirestoreError(error);
+      }
     },
 
     rowClass(order) {
@@ -359,10 +514,14 @@ window.orderApp = function orderApp() {
       const confirmDelete = window.confirm("Delete this order? This cannot be undone.");
       if (!confirmDelete) return;
 
-      await deleteDoc(doc(db, "orders", this.activeOrderId));
-      this.showOrderForm = false;
-      this.activeOrderId = null;
-      await this.loadOrders();
+      try {
+        await deleteDoc(doc(db, "orders", this.activeOrderId));
+        this.showOrderForm = false;
+        this.activeOrderId = null;
+        await this.loadOrders();
+      } catch (error) {
+        this.handleFirestoreError(error);
+      }
     },
 
     async saveOrder() {
@@ -375,19 +534,23 @@ window.orderApp = function orderApp() {
         updatedAt: serverTimestamp(),
       };
 
-      if (this.orderFormMode === "create") {
-        await addDoc(ordersRef, {
-          ...payload,
-          status: "order",
-          createdAt: serverTimestamp(),
-        });
-      } else if (this.activeOrderId) {
-        const ref = doc(db, "orders", this.activeOrderId);
-        await updateDoc(ref, payload);
-      }
+      try {
+        if (this.orderFormMode === "create") {
+          await addDoc(ordersRef, {
+            ...payload,
+            status: "order",
+            createdAt: serverTimestamp(),
+          });
+        } else if (this.activeOrderId) {
+          const ref = doc(db, "orders", this.activeOrderId);
+          await updateDoc(ref, payload);
+        }
 
-      this.showOrderForm = false;
-      await this.loadOrders();
+        this.showOrderForm = false;
+        await this.loadOrders();
+      } catch (error) {
+        this.handleFirestoreError(error);
+      }
     },
 
     openDispatch(order) {
@@ -437,10 +600,14 @@ window.orderApp = function orderApp() {
         updatedAt: serverTimestamp(),
       };
 
-      const ref = doc(db, "orders", this.activeOrderId);
-      await updateDoc(ref, payload);
-      this.showDispatchForm = false;
-      await this.loadOrders();
+      try {
+        const ref = doc(db, "orders", this.activeOrderId);
+        await updateDoc(ref, payload);
+        this.showDispatchForm = false;
+        await this.loadOrders();
+      } catch (error) {
+        this.handleFirestoreError(error);
+      }
     },
 
     openPayment(order) {
@@ -471,10 +638,14 @@ window.orderApp = function orderApp() {
         updatedAt: serverTimestamp(),
       };
 
-      const ref = doc(db, "orders", this.activeOrderId);
-      await updateDoc(ref, payload);
-      this.showPaymentForm = false;
-      await this.loadOrders();
+      try {
+        const ref = doc(db, "orders", this.activeOrderId);
+        await updateDoc(ref, payload);
+        this.showPaymentForm = false;
+        await this.loadOrders();
+      } catch (error) {
+        this.handleFirestoreError(error);
+      }
     },
   };
 };

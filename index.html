@@ -12,14 +12,72 @@
     <div class="max-w-6xl mx-auto px-4 py-6" x-data="orderApp()" x-init="init()">
       <div class="flex items-center justify-between mb-4">
         <h1 class="text-xl font-semibold">Order Management</h1>
-        <button
-          class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-          @click="openNewOrder()"
-        >
-          + Add New Order
-        </button>
+        <div class="flex items-center gap-2">
+          <template x-if="authReady && currentUser">
+            <button
+              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+              @click="openNewOrder()"
+            >
+              + Add New Order
+            </button>
+          </template>
+          <template x-if="authReady && currentUser">
+            <button
+              class="px-4 py-2 rounded border border-slate-300 bg-white hover:bg-slate-50"
+              @click="logout()"
+              :disabled="authLoading"
+            >
+              Sign Out
+            </button>
+          </template>
+        </div>
       </div>
 
+      <div class="mb-4 text-sm text-slate-600" x-show="!authReady">
+        Checking authentication...
+      </div>
+
+      <div class="bg-white rounded shadow p-4 max-w-md" x-show="authReady && !currentUser">
+        <h2 class="text-base font-medium mb-3">Phone Sign In</h2>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs">Phone Number</label>
+            <input
+              type="tel"
+              class="w-full border rounded px-3 py-2"
+              placeholder="+14155552671"
+              x-model="phoneForm.phoneNumber"
+            />
+          </div>
+          <button
+            class="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:bg-slate-400"
+            @click="sendOtp()"
+            :disabled="authLoading"
+          >
+            Send OTP
+          </button>
+          <div x-show="otpSent" class="space-y-2">
+            <label class="text-xs">OTP</label>
+            <input
+              type="text"
+              class="w-full border rounded px-3 py-2"
+              placeholder="123456"
+              x-model="phoneForm.otp"
+            />
+            <button
+              class="w-full bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-700 disabled:bg-slate-400"
+              @click="verifyOtp()"
+              :disabled="authLoading"
+            >
+              Verify OTP
+            </button>
+          </div>
+          <div id="recaptcha-container" class="pt-1"></div>
+          <div class="text-xs text-red-600" x-show="authError" x-text="authError"></div>
+        </div>
+      </div>
+
+      <div x-show="authReady && currentUser">
       <div class="flex items-center gap-2 mb-3 text-xs">
         <button
           class="px-3 py-1 rounded border"
@@ -473,6 +531,7 @@
         >
           Next
         </button>
+      </div>
       </div>
 
       <!-- Order Form Modal -->

@@ -2,8 +2,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 import {
   getAuth,
-  signInAnonymously,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
   onAuthStateChanged,
+  signOut,
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
@@ -19,17 +21,25 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+auth.languageCode = "en";
 
-const ensureAnonymousAuth = () =>
-  new Promise((resolve, reject) => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) {
-        unsub();
-        resolve(user);
-      }
-    });
+const observeAuthState = (callback) => onAuthStateChanged(auth, callback);
 
-    signInAnonymously(auth).catch((err) => reject(err));
+const createRecaptchaVerifier = (containerId) =>
+  new RecaptchaVerifier(auth, containerId, {
+    size: "normal",
   });
 
-export { db, auth, ensureAnonymousAuth };
+const sendPhoneOtp = (phoneNumber, recaptchaVerifier) =>
+  signInWithPhoneNumber(auth, phoneNumber, recaptchaVerifier);
+
+const signOutUser = () => signOut(auth);
+
+export {
+  db,
+  auth,
+  observeAuthState,
+  createRecaptchaVerifier,
+  sendPhoneOtp,
+  signOutUser,
+};
