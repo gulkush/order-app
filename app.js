@@ -80,6 +80,7 @@ window.orderApp = function orderApp() {
       dispatchNumber: "",
       dispatchDate: "",
       dispatchDetails: "",
+      orderQuantity: 0,
       dispatchQuantity: 0,
       tax: 0,
     },
@@ -614,11 +615,20 @@ window.orderApp = function orderApp() {
 
     openDispatch(order) {
       this.activeOrderId = order.id;
+      const orderQuantity = toNumber(order.orderQuantity ?? order.orderWeight);
+      const existingDispatchQuantity = order.dispatchQuantity ?? order.dispatchWeight;
+      const dispatchQuantity =
+        existingDispatchQuantity === "" ||
+        existingDispatchQuantity === null ||
+        existingDispatchQuantity === undefined
+          ? orderQuantity
+          : toNumber(existingDispatchQuantity);
       this.dispatchForm = {
         dispatchNumber: order.dispatchNumber || "",
         dispatchDate: toInputDate(order.dispatchDate),
         dispatchDetails: order.dispatchDetails || "",
-        dispatchQuantity: order.dispatchQuantity ?? order.dispatchWeight ?? 0,
+        orderQuantity,
+        dispatchQuantity,
         tax: order.tax || 0,
       };
       this.showDispatchForm = true;
