@@ -63,6 +63,8 @@ window.orderApp = function orderApp() {
       paid: 0,
     },
     filterStatus: "all",
+    stickyFilters: false,
+    onWindowScroll: null,
     pageSize: 20,
     currentPage: 1,
     sortKey: "orderDate",
@@ -93,6 +95,7 @@ window.orderApp = function orderApp() {
     },
 
     async init() {
+      this.setupFilterBarScrollWatcher();
       observeAuthState(async (user) => {
         this.currentUser = user || null;
         this.authReady = true;
@@ -119,6 +122,14 @@ window.orderApp = function orderApp() {
           }
         }
       });
+    },
+
+    setupFilterBarScrollWatcher() {
+      this.onWindowScroll = () => {
+        this.stickyFilters = window.scrollY > 72;
+      };
+      window.addEventListener("scroll", this.onWindowScroll, { passive: true });
+      this.onWindowScroll();
     },
 
     isPermissionDenied(error) {

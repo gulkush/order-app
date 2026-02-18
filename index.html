@@ -7,6 +7,17 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module" src="./app.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+      .touch-scroll {
+        -webkit-overflow-scrolling: touch;
+      }
+      .hide-scrollbar {
+        scrollbar-width: none;
+      }
+      .hide-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+    </style>
   </head>
   <body class="bg-slate-100 text-slate-900">
     <div class="max-w-6xl mx-auto px-4 py-6" x-data="orderApp()" x-init="init()">
@@ -119,42 +130,76 @@
       </div>
 
       <div x-show="authReady && currentUser">
-      <div class="flex items-center gap-2 mb-3 text-sm">
+      <div
+        class="-mx-4 px-4 py-2 mb-3 transition-all duration-200"
+        :class="stickyFilters ? 'sticky top-0 z-30 bg-slate-100/95 backdrop-blur border-b border-slate-200 shadow-sm' : 'bg-transparent'"
+      >
+      <div class="flex items-center gap-2 text-sm overflow-x-auto touch-scroll hide-scrollbar whitespace-nowrap">
         <button
-          class="px-4 py-2 rounded border"
+          class="px-4 py-2 rounded border shrink-0"
           :class="filterStatus === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white'"
           @click="setFilter('all')"
         >
-          All (<span x-text="orders.length"></span>)
+          All (<span x-text="filterCounts.all"></span>)
         </button>
         <button
-          class="px-4 py-2 rounded border"
+          class="px-4 py-2 rounded border shrink-0"
           :class="filterStatus === 'order' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white'"
           @click="setFilter('order')"
         >
-          Order (<span x-text="orders.filter((o) => o.status === 'order').length"></span>)
+          Order (<span x-text="filterCounts.order"></span>)
         </button>
         <button
-          class="px-4 py-2 rounded border"
+          class="px-4 py-2 rounded border shrink-0"
           :class="filterStatus === 'dispatched' ? 'bg-yellow-500 text-white border-yellow-500' : 'bg-white'"
           @click="setFilter('dispatched')"
         >
-          Dispatch (<span x-text="orders.filter((o) => (o.status === 'dispatched' || o.status === 'paid') && !isFullyPaid(o)).length"></span>)
+          Dispatch (<span x-text="filterCounts.dispatched"></span>)
         </button>
         <button
-          class="px-4 py-2 rounded border"
+          class="px-4 py-2 rounded border shrink-0"
           :class="filterStatus === 'paid' ? 'bg-green-600 text-white border-green-600' : 'bg-white'"
           @click="setFilter('paid')"
         >
-          Paid (<span x-text="orders.filter((o) => isFullyPaid(o)).length"></span>)
+          Paid (<span x-text="filterCounts.paid"></span>)
         </button>
+      </div>
       </div>
 
       <div class="mb-3 text-xs text-slate-700" x-show="filterStatus === 'order'">
         Pending Quantity Total: <span class="font-medium" x-text="pendingOrderQuantitySum()"></span>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'all' || filterStatus === 'order'">
+      <div class="space-y-3 md:hidden" x-show="filterStatus === 'all' || filterStatus === 'order'">
+        <template x-if="loading">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">Loading...</div>
+        </template>
+        <template x-if="!loading && paginatedOrders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No orders yet.</div>
+        </template>
+        <template x-for="order in paginatedOrders()" :key="`mobile-all-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'all' || filterStatus === 'order'">
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50">
             <tr>
@@ -221,7 +266,34 @@
         </table>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'dispatched'">
+      <div class="md:hidden space-y-3" x-show="filterStatus === 'dispatched'">
+        <div class="text-xs font-medium text-slate-600 px-1">Recent Dispatches (last 7 days)</div>
+        <template x-if="dispatchedRecentOrders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No recent dispatched orders.</div>
+        </template>
+        <template x-for="order in dispatchedRecentOrders()" :key="`mobile-disp-recent-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'dispatched'">
         <div class="px-4 py-2 text-xs font-medium text-slate-600">Recent Dispatches (last 7 days)</div>
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50">
@@ -284,7 +356,34 @@
         </table>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
+      <div class="md:hidden space-y-3 mt-4" x-show="filterStatus === 'dispatched'">
+        <div class="text-xs font-medium text-slate-600 px-1">Older Than 7 Days (but within 30)</div>
+        <template x-if="dispatchedOld7Orders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No dispatched orders in this range.</div>
+        </template>
+        <template x-for="order in dispatchedOld7Orders()" :key="`mobile-disp-old7-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
         <div class="px-4 py-2 text-xs font-medium text-slate-600">Older Than 7 Days (but within 30)</div>
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50">
@@ -347,7 +446,34 @@
         </table>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
+      <div class="md:hidden space-y-3 mt-4" x-show="filterStatus === 'dispatched'">
+        <div class="text-xs font-medium text-slate-600 px-1">Older Than 30 Days</div>
+        <template x-if="dispatchedOld30Orders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No older dispatched orders.</div>
+        </template>
+        <template x-for="order in dispatchedOld30Orders()" :key="`mobile-disp-old30-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'dispatched'">
         <div class="px-4 py-2 text-xs font-medium text-slate-600">Older Than 30 Days</div>
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50">
@@ -410,7 +536,34 @@
         </table>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'paid'">
+      <div class="md:hidden space-y-3" x-show="filterStatus === 'paid'">
+        <div class="text-xs font-medium text-slate-600 px-1">Recent Payments (last 30 days)</div>
+        <template x-if="paidRecentOrders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No recent paid orders.</div>
+        </template>
+        <template x-for="order in paidRecentOrders()" :key="`mobile-paid-recent-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto" x-show="filterStatus === 'paid'">
         <div class="px-4 py-2 text-xs font-medium text-slate-600">Recent Payments (last 30 days)</div>
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50">
@@ -473,7 +626,39 @@
         </table>
       </div>
 
-      <div class="bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'paid'">
+      <div class="md:hidden space-y-3 mt-4" x-show="filterStatus === 'paid'">
+        <div class="bg-white rounded shadow px-4 py-2 text-xs font-medium text-slate-600 flex items-center justify-between gap-2">
+          <span>Older Than 30 Days</span>
+          <button class="px-3 py-1 rounded border text-red-600 border-red-200 hover:bg-red-50" @click="deleteOlderPaid()">
+            Delete All Older Records
+          </button>
+        </div>
+        <template x-if="paidOldOrders().length === 0">
+          <div class="bg-white rounded shadow px-4 py-4 text-sm">No older paid orders.</div>
+        </template>
+        <template x-for="order in paidOldOrders()" :key="`mobile-paid-old-${order.id}`">
+          <article :class="rowClass(order)" class="rounded shadow p-4 space-y-3">
+            <div class="flex items-start justify-between gap-2">
+              <button class="text-left font-medium underline-offset-2 hover:underline" @click="openEditOrder(order)" x-text="order.partyName || '-'"></button>
+              <span class="text-xs text-slate-700" x-text="formatDate(order.orderDate)"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div>Qty: <span class="font-medium" x-text="order.orderQuantity ?? '-'"></span></div>
+              <div>Rate: <span class="font-medium" x-text="order.rate ?? '-'"></span></div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 text-xs">
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openDispatch(order)">
+                Dispatch: <span x-text="dispatchSummary(order)"></span>
+              </button>
+              <button class="rounded border bg-white px-3 py-2 text-left" @click="openPayment(order)">
+                Payment: <span x-text="paymentSummary(order)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div class="hidden md:block bg-white rounded shadow overflow-x-auto mt-4" x-show="filterStatus === 'paid'">
         <div class="px-4 py-2 text-xs font-medium text-slate-600 flex items-center justify-between">
           <span>Older Than 30 Days</span>
           <button
@@ -549,23 +734,26 @@
         x-show="(filterStatus === 'all' || filterStatus === 'order') && pageCount() > 1"
       >
         <button
-          class="px-3 py-1 rounded border"
+          class="px-3 py-2 rounded border"
           :class="currentPage === 1 ? 'text-slate-400 border-slate-200' : 'bg-white'"
           @click="goToPage(currentPage - 1)"
           :disabled="currentPage === 1"
         >
           Prev
         </button>
+        <span class="text-xs text-slate-600 md:hidden">
+          Page <span x-text="currentPage"></span> of <span x-text="pageCount()"></span>
+        </span>
         <template x-for="page in pages()" :key="page">
           <button
-            class="px-3 py-1 rounded border"
+            class="hidden md:inline-block px-3 py-1 rounded border"
             :class="currentPage === page ? 'bg-slate-900 text-white border-slate-900' : 'bg-white'"
             @click="goToPage(page)"
             x-text="page"
           ></button>
         </template>
         <button
-          class="px-3 py-1 rounded border"
+          class="px-3 py-2 rounded border"
           :class="currentPage === pageCount() ? 'text-slate-400 border-slate-200' : 'bg-white'"
           @click="goToPage(currentPage + 1)"
           :disabled="currentPage === pageCount()"
@@ -573,28 +761,41 @@
           Next
         </button>
       </div>
+
+      <template x-if="authReady && currentUser">
+        <button
+          class="md:hidden fixed right-4 bottom-4 z-40 h-14 w-14 rounded-full bg-blue-600 text-white text-3xl leading-none shadow-lg shadow-blue-600/30"
+          @click="openNewOrder()"
+          aria-label="Add new order"
+        >
+          +
+        </button>
+      </template>
       </div>
 
       <!-- Order Form Modal -->
       <div
-        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        class="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
         x-show="showOrderForm"
         x-transition
       >
-        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closeOrderForm()">
+        <div class="bg-white rounded-t-2xl sm:rounded shadow w-full max-w-lg max-h-[92vh] flex flex-col" @click.away="closeOrderForm()">
           <div class="px-4 py-3 border-b flex items-center justify-between">
             <h2 class="font-medium" x-text="orderFormMode === 'create' ? 'New Order' : 'Edit Order'"></h2>
-            <button
-              type="button"
-              class="px-3 py-1 rounded border text-red-600 border-red-200 hover:bg-red-50 disabled:text-slate-400 disabled:border-slate-200 disabled:hover:bg-white"
-              x-show="orderFormMode === 'edit'"
-              :disabled="!canDeleteOrderFromEdit()"
-              @click="deleteOrderFromEdit()"
-            >
-              Delete
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="px-3 py-1 rounded border text-red-600 border-red-200 hover:bg-red-50 disabled:text-slate-400 disabled:border-slate-200 disabled:hover:bg-white"
+                x-show="orderFormMode === 'edit'"
+                :disabled="!canDeleteOrderFromEdit()"
+                @click="deleteOrderFromEdit()"
+              >
+                Delete
+              </button>
+              <button type="button" class="px-3 py-1 rounded border" @click="closeOrderForm()">Close</button>
+            </div>
           </div>
-          <div class="p-4 space-y-3">
+          <div class="p-4 space-y-3 overflow-y-auto touch-scroll">
             <div>
               <label class="text-xs">Order Date</label>
               <input type="date" class="w-full border rounded px-3 py-2" x-model="orderForm.orderDate" />
@@ -607,7 +808,7 @@
               <label class="text-xs">Order Details</label>
               <textarea class="w-full border rounded px-3 py-2" x-model="orderForm.orderDetails"></textarea>
             </div>
-            <div class="grid grid-cols-2 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label class="text-xs">Order Quantity</label>
                 <input type="number" step="0.01" class="w-full border rounded px-3 py-2" x-model.number="orderForm.orderQuantity" />
@@ -618,7 +819,7 @@
               </div>
             </div>
           </div>
-          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+          <div class="px-4 py-3 border-t flex justify-end gap-2 bg-white sticky bottom-0">
             <button class="px-4 py-2" @click="closeOrderForm()">Cancel</button>
             <button class="bg-blue-600 text-white px-4 py-2 rounded" @click="saveOrder()">
               Save
@@ -629,15 +830,16 @@
 
       <!-- Dispatch Form Modal -->
       <div
-        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        class="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
         x-show="showDispatchForm"
         x-transition
       >
-        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closeDispatchForm()">
-          <div class="px-4 py-3 border-b">
+        <div class="bg-white rounded-t-2xl sm:rounded shadow w-full max-w-lg max-h-[92vh] flex flex-col" @click.away="closeDispatchForm()">
+          <div class="px-4 py-3 border-b flex items-center justify-between">
             <h2 class="font-medium">Dispatch</h2>
+            <button type="button" class="px-3 py-1 rounded border" @click="closeDispatchForm()">Close</button>
           </div>
-          <div class="p-4 space-y-3">
+          <div class="p-4 space-y-3 overflow-y-auto touch-scroll">
             <div>
               <label class="text-xs">Dispatch Number</label>
               <input type="text" class="w-full border rounded px-3 py-2" x-model="dispatchForm.dispatchNumber" />
@@ -680,7 +882,7 @@
               Amount (auto): <span x-text="calcDispatchAmount()"></span>
             </div>
           </div>
-          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+          <div class="px-4 py-3 border-t flex justify-end gap-2 bg-white sticky bottom-0">
             <button class="px-4 py-2" @click="closeDispatchForm()">Cancel</button>
             <button class="bg-amber-600 text-white px-4 py-2 rounded" @click="saveDispatch()">
               Save
@@ -691,15 +893,16 @@
 
       <!-- Payment Form Modal -->
       <div
-        class="fixed inset-0 bg-black/40 flex items-center justify-center p-4"
+        class="fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4"
         x-show="showPaymentForm"
         x-transition
       >
-        <div class="bg-white rounded shadow w-full max-w-lg" @click.away="closePaymentForm()">
-          <div class="px-4 py-3 border-b">
+        <div class="bg-white rounded-t-2xl sm:rounded shadow w-full max-w-lg max-h-[92vh] flex flex-col" @click.away="closePaymentForm()">
+          <div class="px-4 py-3 border-b flex items-center justify-between">
             <h2 class="font-medium">Payment</h2>
+            <button type="button" class="px-3 py-1 rounded border" @click="closePaymentForm()">Close</button>
           </div>
-          <div class="p-4 space-y-3">
+          <div class="p-4 space-y-3 overflow-y-auto touch-scroll">
             <div>
               <label class="text-xs">Payment Date</label>
               <input type="date" class="w-full border rounded px-3 py-2" x-model="paymentForm.paymentDate" />
@@ -726,7 +929,7 @@
               />
             </div>
           </div>
-          <div class="px-4 py-3 border-t flex justify-end space-x-2">
+          <div class="px-4 py-3 border-t flex justify-end gap-2 bg-white sticky bottom-0">
             <button class="px-4 py-2" @click="closePaymentForm()">Cancel</button>
             <button class="bg-emerald-600 text-white px-4 py-2 rounded" @click="savePayment()">
               Save
